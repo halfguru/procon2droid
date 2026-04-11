@@ -1,0 +1,6 @@
+id=procon2droid
+name=Switch 2 Pro Controller Support
+version=v1.0
+versionCode=1
+author=hapqe
+description=Enables the Switch 2 Pro Controller and forwards rumble data
