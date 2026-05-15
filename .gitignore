@@ -1,0 +1,28 @@
+build/
+build-debug/
+build-android-arm64/
+build-android-armv7/
+build_android/
+build_dummy/
+compile_commands.json
+*.o
+*.obj
+*.exe
+*.out
+*.app
+
+# Packaging outputs
+*.zip
+*.tar.gz
+
+# Generated files
+module.prop
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
