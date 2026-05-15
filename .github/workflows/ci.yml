@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install LLVM tools
+        uses: egor-tensin/setup-clang@v2
+        with:
+          version: 22
+
+      - name: Check formatting
+        run: clang-format-22 --dry-run --Werror $(find src tests -name '*.cpp' -o -name '*.hpp' -o -name '*.h')
+
+      - name: Generate compile commands for lint
+        run: cmake -S . -B build_lint -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: clang-tidy-22 -p build_lint $(find src tests -name '*.cpp')
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target procon2droid_tests
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  build-android:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          link-to-sdk: true
+
+      - name: Configure ${{ matrix.abi }}
+        run: |
+          cmake -S . -B build_${{ matrix.abi }} \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-24 \
+            -DPROCON2DROID_BUILD_TESTS=OFF
+
+      - name: Build ${{ matrix.abi }}
+        run: cmake --build build_${{ matrix.abi }} --target enable rumble
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: binaries-${{ matrix.abi }}
+          path: |
+            build_${{ matrix.abi }}/src/enable
+            build_${{ matrix.abi }}/src/rumble
+
+  package:
+    needs: build-android
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download arm64 binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: binaries-arm64-v8a
+          path: dist/arm64-v8a
+
+      - name: Download armv7 binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: binaries-armeabi-v7a
+          path: dist/armeabi-v7a
+
+      - name: Regenerate module.prop
+        run: cmake -S . -B build_dummy
+
+      - name: Package Magisk module
+        run: |
+          for abi in arm64-v8a armeabi-v7a; do
+            mkdir -p "package_$abi/system/bin"
+            cp module.prop "package_$abi/"
+            cp service.sh "package_$abi/"
+            cp "dist/$abi/enable" "package_$abi/system/bin/"
+            cp "dist/$abi/rumble" "package_$abi/system/bin/"
+            chmod +x "package_$abi/system/bin/"*
+            zip -r "procon2droid-${GITHUB_REF_NAME}-$abi.zip" "package_$abi/"
+          done
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            procon2droid-*.zip
